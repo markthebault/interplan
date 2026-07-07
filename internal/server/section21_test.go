@@ -14,6 +14,8 @@ import (
 
 func TestSection21MinimalProtocol(t *testing.T) {
 	store := session.NewStore(filepath.Join(t.TempDir(), "state.json"))
+	watcher := NewFileWatcher(false)
+	defer watcher.Stop()
 	file := "/tmp/doc.html"
 	key := session.Key(file)
 	if _, err := store.Open(file, session.URLFor(key, 37917), false); err != nil {
@@ -27,7 +29,7 @@ func TestSection21MinimalProtocol(t *testing.T) {
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/"+key+"/prompts", body)
 	rec := httptest.NewRecorder()
-	Handler(store).ServeHTTP(rec, req)
+	Handler(store, watcher).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("POST /api/%s/prompts = %d, body %s", key, rec.Code, rec.Body.String())
 	}
@@ -60,6 +62,8 @@ func TestSessionAndArtifactRoutesRender(t *testing.T) {
 		t.Fatalf("write fixture: %v", err)
 	}
 	store := session.NewStore(filepath.Join(t.TempDir(), "state.json"))
+	watcher := NewFileWatcher(false)
+	defer watcher.Stop()
 	canonical, err := session.CanonicalPath(file)
 	if err != nil {
 		t.Fatalf("CanonicalPath: %v", err)
@@ -71,17 +75,20 @@ func TestSessionAndArtifactRoutesRender(t *testing.T) {
 
 	sessionReq := httptest.NewRequest(http.MethodGet, "/session/"+key, nil)
 	sessionRec := httptest.NewRecorder()
-	Handler(store).ServeHTTP(sessionRec, sessionReq)
+	Handler(store, watcher).ServeHTTP(sessionRec, sessionReq)
 	if sessionRec.Code != http.StatusOK || !strings.Contains(sessionRec.Body.String(), "<iframe") {
 		t.Fatalf("session route = %d, body %s", sessionRec.Code, sessionRec.Body.String())
 	}
 	if !strings.Contains(sessionRec.Body.String(), "id=\"annotate\"") || !strings.Contains(sessionRec.Body.String(), "queueAnnotation") {
 		t.Fatalf("session route did not include annotation UI: %s", sessionRec.Body.String())
 	}
+	if !strings.Contains(sessionRec.Body.String(), "new EventSource") {
+		t.Fatalf("session route did not include SSE connection: %s", sessionRec.Body.String())
+	}
 
 	artifactReq := httptest.NewRequest(http.MethodGet, "/artifact/"+key+"/index.html", nil)
 	artifactRec := httptest.NewRecorder()
-	Handler(store).ServeHTTP(artifactRec, artifactReq)
+	Handler(store, watcher).ServeHTTP(artifactRec, artifactReq)
 	if artifactRec.Code != http.StatusOK {
 		t.Fatalf("artifact route = %d, body %s", artifactRec.Code, artifactRec.Body.String())
 	}

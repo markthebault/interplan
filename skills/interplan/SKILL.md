@@ -23,16 +23,39 @@ If `interplan` is not on `PATH`, look for a local binary first:
 ```
 
 3. Tell the user the review URL from stdout if the browser does not open automatically.
-4. Poll for feedback:
+4. **Begin polling immediately**. Do not wait for user confirmation. The `poll` command will block until feedback arrives:
 
 ```sh
 interplan poll /absolute/path/to/artifact.html
 ```
 
-Use `--timeout-ms` only when you intentionally want a bounded poll during manual tests or automation.
+   The poll will return when:
+   - The user submits feedback ("Send" or "Send & End")
+   - The session is ended
+   - A timeout is reached (if `--timeout-ms` was specified)
 
 5. Apply feedback to the source artifact or surrounding project files.
-6. If the session is still open, poll again. Stop when poll returns `session_ended: true` or `status: ended`.
+6. If the session is still open (`session_ended: false`), poll again. Stop when poll returns `session_ended: true` or `status: ended`.
+7. Continue the loop until the user ends the session.
+
+### Example Full Flow
+
+```sh
+# Open the session (browser opens automatically)
+interplan /tmp/plan.html
+
+# Start polling immediately - this blocks until feedback
+while true; do
+  # Poll blocks here waiting for user input
+  interplan poll /tmp/plan.html
+  
+  # When poll returns, check if session ended
+  # (in practice, parse the output to check session_ended)
+  # If ended, break; otherwise apply feedback and continue
+done
+```
+
+Do not ask the user to "let you know" when they're done. The polling mechanism handles synchronization automatically.
 
 ## Watching For Feedback
 
@@ -86,25 +109,84 @@ Apply this as a targeted change to the element represented by the selector/text,
 
 ## Updating The Artifact During Review
 
-After applying feedback to the HTML file, tell the user to click **Reload** in the Interplan browser UI if they need to inspect the updated artifact.
+✅ **Live reload is now automatic!**
 
-Do not claim automatic live reload is available unless the current repository implements it. At present, use the browser Reload control or reopen the same artifact with Interplan.
+When the agent edits the HTML file:
+1. The server detects the change (polling every 500ms)
+2. Sends a reload event to the browser via SSE
+3. Browser automatically reloads the iframe
+4. Scroll position is preserved
+
+The agent should:
+1. Apply changes to the HTML file
+2. Announce: "I've updated the file. The browser will reload automatically."
+3. Continue polling for more feedback
+
+Example agent message:
+```
+I've updated the title and changed the card background to red.
+The browser should reload automatically to show the changes.
+I'm polling for your next round of feedback...
+```
+
+The user does not need to click Reload manually. The changes appear automatically within ~500ms.
 
 ## Manual Test Helpers
 
-In this repository, use:
+For **manual testing by a human** (not normal agent workflow), the test scripts are split into two commands:
 
 ```sh
-just test-manual-complex-demo
-just test-manual-poll-complex-demo
+just test-manual-complex-demo  # Opens browser, then STOPS
+```
+
+This opens the browser and **intentionally does NOT poll** so a human can manually test the browser UI.
+
+After manually submitting feedback in the browser:
+
+```sh
+just test-manual-poll-complex-demo  # Polls once with timeout
 ```
 
 If `just` is unavailable:
 
 ```sh
 ./scripts/manual-complex-demo.sh
+# MANUAL TESTING: Script stops here for human interaction
 INTERPLAN_PORT="$(cat /tmp/interplan-complex-demo.port)" ./bin/interplan poll /tmp/interplan-complex-demo.html --timeout-ms 1000
 ```
+
+### Agent Workflow vs Manual Testing
+
+**For agents in production** (normal use):
+- Open the session
+- **Immediately start polling** (blocking, no timeout)
+- Automatically process feedback when it arrives
+- Continue polling until session ends
+- Do NOT ask user to confirm they're ready
+
+**For manual testing** (developers testing the tool itself):
+- Use the split test commands above
+- Open the browser, manually interact with UI
+- Run poll command separately to verify feedback was captured
+
+### Correct Agent Behavior Example
+
+```sh
+# Agent opens session
+interplan /tmp/plan.html
+# Output: session opened at http://...
+
+# Agent immediately starts polling (BLOCKS here)
+interplan poll /tmp/plan.html
+# Agent announces: "I'm now polling for your feedback. Take your time reviewing."
+# ... waits silently until user submits feedback ...
+# Poll returns with feedback
+
+# Agent processes and applies feedback
+# If session still open, poll again
+```
+
+**Incorrect:** Asking "let me know when you're done" and waiting for user confirmation before polling.
 
 ## Safety And State
 
@@ -117,3 +199,23 @@ On macOS, local state is:
 ```
 
 Read the state file only for debugging. Use `interplan poll` for normal agent workflows.
+
+## Port Conflicts
+
+The default port is `37917` (configurable via `INTERPLAN_PORT`). If you get:
+
+```
+server did not become healthy on port 37917
+```
+
+Another interplan server is already running on that port. Options:
+
+1. **Use a different port**: `INTERPLAN_PORT=37918 ./bin/interplan /path/to/file.html`
+2. **Stop old servers**: `pkill interplan`
+3. **Use the test script**: `./scripts/manual-complex-demo.sh` (auto-finds free port)
+
+Check running servers:
+
+```bash
+lsof -nP -iTCP:37917 -sTCP:LISTEN
+```

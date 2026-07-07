@@ -21,9 +21,21 @@ Intentionally not implemented yet:
 - Export.
 - Share/publish.
 - Agent hook installation.
-- Full annotation UI, Mermaid node picking, layout gate detection, SSE presence, and live reload.
+- Full annotation UI, Mermaid node picking, and layout gate detection.
 
 Those are later parity features and should remain behind the proven open/post/poll loop.
+
+## Live Reload
+
+✅ **Automatic live reload is now implemented!**
+
+When you edit the HTML artifact file:
+- The server detects the change (checks every 500ms)
+- Sends a reload event via Server-Sent Events (SSE)
+- Browser automatically reloads the iframe
+- Scroll position is preserved
+
+No manual "Reload" button click needed. The agent can edit the file and the user will see changes automatically.
 
 ## Intentional choices
 

@@ -16,10 +16,12 @@ import (
 )
 
 func Serve(addr string, store *session.Store) error {
-	return http.ListenAndServe(addr, Handler(store))
+	debugMode := os.Getenv("INTERPLAN_DEBUG") == "1"
+	watcher := NewFileWatcher(debugMode)
+	return http.ListenAndServe(addr, Handler(store, watcher))
 }
 
-func Handler(store *session.Store) http.Handler {
+func Handler(store *session.Store, watcher *FileWatcher) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -41,6 +43,9 @@ func Handler(store *session.Store) http.Handler {
 			return
 		}
 		writeChrome(w, sess)
+	})
+	mux.HandleFunc("/sse/", func(w http.ResponseWriter, r *http.Request) {
+		handleSSE(w, r, store, watcher)
 	})
 	mux.HandleFunc("/artifact/", func(w http.ResponseWriter, r *http.Request) {
 		serveArtifact(w, r, store)
@@ -82,6 +87,50 @@ func Handler(store *session.Store) http.Handler {
 		http.NotFound(w, r)
 	})
 	return mux
+}
+
+func handleSSE(w http.ResponseWriter, r *http.Request, store *session.Store, watcher *FileWatcher) {
+	key := strings.TrimPrefix(r.URL.Path, "/sse/")
+	if key == "" || strings.Contains(key, "/") {
+		http.NotFound(w, r)
+		return
+	}
+
+	sess, err := store.GetByKey(key)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Send initial connection event
+	_, _ = w.Write([]byte("event: connected\ndata: {}\n\n"))
+	flusher.Flush()
+
+	// Watch for file changes
+	changeChan := watcher.Watch(sess.File)
+	defer watcher.Unwatch(sess.File, changeChan)
+
+	// Send reload events when file changes
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-changeChan:
+			_, _ = w.Write([]byte("event: reload\ndata: {}\n\n"))
+			flusher.Flush()
+		}
+	}
 }
 
 func handleListSessions(w http.ResponseWriter, r *http.Request, store *session.Store) {
@@ -417,6 +466,34 @@ let annotate = false;
 let pendingTarget = null;
 let queued = [];
 let frameClickHandler = null;
+let scrollPosition = 0;
+
+// Connect to SSE for live reload
+const sse = new EventSource("/sse/"+key);
+sse.addEventListener("reload", () => {
+  // Save scroll position before reload
+  try {
+    const frameDoc = frame.contentDocument || frame.contentWindow.document;
+    scrollPosition = frameDoc.documentElement.scrollTop || frameDoc.body.scrollTop;
+  } catch {}
+  
+  frame.contentWindow.location.reload();
+});
+
+// Restore scroll position after reload
+frame.addEventListener("load", () => {
+  if(scrollPosition > 0) {
+    setTimeout(() => {
+      try {
+        const frameDoc = frame.contentDocument || frame.contentWindow.document;
+        frameDoc.documentElement.scrollTop = scrollPosition;
+        frameDoc.body.scrollTop = scrollPosition;
+      } catch {}
+    }, 50);
+  }
+  attachFrameAnnotation();
+});
+
 function cssEscape(value){
   if(window.CSS && CSS.escape) return CSS.escape(value);
   return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
@@ -527,7 +604,6 @@ window.addEventListener("message", event => {
   if(event.data && event.data.type === "interplan:ready") attachFrameAnnotation();
 });
 annotateBtn.onclick = () => setAnnotate(!annotate);
-frame.addEventListener("load", () => attachFrameAnnotation());
 document.getElementById("reload").onclick = () => frame.contentWindow.location.reload();
 document.getElementById("send").onclick = () => send(false);
 document.getElementById("end").onclick = () => send(true);
