@@ -2,6 +2,14 @@
 
 AI agent interactive planning tool: open an HTML artifact for review, collect browser feedback, and return structured agent-readable output.
 
+## Installation
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/markthebault/interplan/main/scripts/install.sh | sh
+```
+
+Set `INTERPLAN_INSTALL_DIR` to choose a different install directory.
+
 This implementation follows `lavish_axi_clone_spec.html` as authoritative.
 
 ## Current build slice
