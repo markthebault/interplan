@@ -1,0 +1,7 @@
+interface:
+  display_name: "Interplan Review"
+  short_description: "Review HTML artifacts with Interplan."
+  default_prompt: "Use $interplan to create a reviewable HTML artifact, open it with Interplan, poll for browser annotations, and apply the feedback."
+
+policy:
+  allow_implicit_invocation: true
