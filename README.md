@@ -58,3 +58,7 @@ interplan poll /tmp/doc.html
 ```
 
 The Section 21 proof is captured in `internal/server/section21_test.go`.
+
+## Releases
+
+Release automation uses GitHub Actions, Conventional Commits, and Release Please. See [`doc/RELEASES.md`](doc/RELEASES.md) for the full process.
