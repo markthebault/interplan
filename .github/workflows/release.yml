@@ -1,75 +1,23 @@
-name: Release
+name: Release Binaries
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release, for example v0.1.0 or v0.1.0-rc.1'
-        required: true
-        type: string
-      prerelease:
-        description: 'Mark the GitHub release as a prerelease'
-        required: true
-        default: false
-        type: boolean
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  release:
+    types:
+      - published
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build and publish release
+  release-binaries:
+    name: Build and upload release binaries
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout release tag
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
-
-      - name: Resolve release version
-        id: release
-        shell: bash
-        run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            version="${{ inputs.version }}"
-            prerelease="${{ inputs.prerelease }}"
-          else
-            version="${GITHUB_REF_NAME}"
-            if [[ "$version" == *-* ]]; then
-              prerelease="true"
-            else
-              prerelease="false"
-            fi
-          fi
-
-          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid version: $version" >&2
-            echo "Version must match vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease, for example v0.1.0 or v0.1.0-rc.1." >&2
-            exit 1
-          fi
-
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-
-      - name: Create and push tag for manual release
-        if: github.event_name == 'workflow_dispatch'
-        shell: bash
-        run: |
-          version="${{ steps.release.outputs.version }}"
-          git fetch --tags origin
-          if git ls-remote --exit-code --tags origin "refs/tags/$version" >/dev/null 2>&1; then
-            echo "Tag $version already exists on origin." >&2
-            exit 1
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$version" -m "Release $version"
-          git push origin "refs/tags/$version"
+          ref: ${{ github.event.release.tag_name }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -81,17 +29,9 @@ jobs:
         run: go test ./...
 
       - name: Build release binaries
-        run: ./scripts/build-release.sh "${{ steps.release.outputs.version }}"
+        run: ./scripts/build-release.sh "${{ github.event.release.tag_name }}"
 
-      - name: Generate changelog
-        run: ./scripts/changelog.sh "${{ steps.release.outputs.version }}" > CHANGELOG_RELEASE.md
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.release.outputs.version }}
-          name: Interplan ${{ steps.release.outputs.version }}
-          body_path: CHANGELOG_RELEASE.md
-          files: dist/*
-          prerelease: ${{ steps.release.outputs.prerelease }}
-          generate_release_notes: false
+      - name: Upload binaries to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
