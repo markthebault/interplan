@@ -40,11 +40,11 @@ func (w *FileWatcher) Watch(path string) <-chan struct{} {
 
 	ch := make(chan struct{}, 1)
 	w.watchers[path] = append(w.watchers[path], ch)
-	
+
 	if w.debugMode {
 		log.Printf("[watcher] added watch for %s (total watchers: %d)", path, len(w.watchers[path]))
 	}
-	
+
 	return ch
 }
 
@@ -103,7 +103,7 @@ func (w *FileWatcher) checkFiles() {
 			if w.debugMode {
 				log.Printf("[watcher] detected change in %s", filepath.Base(path))
 			}
-			
+
 			// Notify all watchers
 			for _, ch := range w.watchers[path] {
 				select {
