@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/markthebault/interplan/compare/v0.2.0...v0.3.0) (2026-07-08)
+
+
+### Features
+
+* add annotation hover outline ([a1193c3](https://github.com/markthebault/interplan/commit/a1193c36179dcc04a004c1cb6838789c90b3e9cc))
+* add annotation hover outline ([05d2b27](https://github.com/markthebault/interplan/commit/05d2b2702651374858b152aaacf8c4cf9805b7c0))
+
 ## [0.2.0](https://github.com/markthebault/interplan/compare/v0.1.0...v0.2.0) (2026-07-08)
 
 
