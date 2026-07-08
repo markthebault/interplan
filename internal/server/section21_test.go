@@ -95,7 +95,33 @@ func TestSessionAndArtifactRoutesRender(t *testing.T) {
 	if !strings.Contains(artifactRec.Body.String(), "window.interplan") {
 		t.Fatalf("artifact did not include SDK injection: %s", artifactRec.Body.String())
 	}
-	if !strings.Contains(sessionRec.Body.String(), "attachFrameAnnotation") || !strings.Contains(sessionRec.Body.String(), "selectorFor") || !strings.Contains(sessionRec.Body.String(), "pickAnnotationTarget") {
+	body := sessionRec.Body.String()
+	if !strings.Contains(body, "attachFrameAnnotation") || !strings.Contains(body, "selectorFor") || !strings.Contains(body, "pickAnnotationTarget") {
 		t.Fatalf("session route did not include annotation capture code: %s", sessionRec.Body.String())
 	}
+	for _, required := range []string{"maybeCaptureSelection", "suppressNextClick", "normalizeSelectionText", "elementFromSelectionRange"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("session route did not include text annotation helper %q: %s", required, body)
+		}
+	}
+	for _, required := range []string{"friendlyTargetLabel", "displaySnippet", "Text selected:", "Comment on selected text", "Comment on this "} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("session route did not include friendly annotation copy %q: %s", required, body)
+		}
+	}
+	if !containsAny(body, `tag:"text"`, `tag: "text"`) {
+		t.Fatalf("session route did not include text prompt tag: %s", body)
+	}
+	if !containsAny(body, `kind:"text"`, `kind: "text"`) {
+		t.Fatalf("session route did not include text target kind: %s", body)
+	}
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
 }

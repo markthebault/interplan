@@ -111,3 +111,46 @@ func TestStructuredPromptAndLayoutWarningFieldsSurvivePoll(t *testing.T) {
 		t.Fatalf("overflow = %d", got)
 	}
 }
+
+func TestTextAnnotationPromptFieldsSurvivePoll(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "state.json"))
+	file := "/tmp/doc.html"
+	key := Key(file)
+	if _, err := store.Open(file, URLFor(key, 37917), false); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := store.AddPrompts(key, PromptPost{
+		Prompts: []protocol.Prompt{{
+			Tag:      "text",
+			Prompt:   "Tighten this sentence.",
+			Text:     "selected quote",
+			Selector: "p:nth-of-type(2)",
+			Target: map[string]any{
+				"kind":     "text",
+				"selector": "p:nth-of-type(2)",
+				"tag":      "p",
+				"text":     "selected quote",
+				"context":  "A paragraph with selected quote inside it.",
+			},
+		}},
+	}); err != nil {
+		t.Fatalf("AddPrompts: %v", err)
+	}
+	poll, err := store.Poll(file)
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if len(poll.Prompts) != 1 {
+		t.Fatalf("Prompts = %+v", poll.Prompts)
+	}
+	prompt := poll.Prompts[0]
+	if prompt.Tag != "text" || prompt.Text != "selected quote" || prompt.Selector != "p:nth-of-type(2)" {
+		t.Fatalf("text prompt = %+v", prompt)
+	}
+	if got := prompt.Target["kind"]; got != "text" {
+		t.Fatalf("target kind = %v", got)
+	}
+	if got := prompt.Target["context"]; got != "A paragraph with selected quote inside it." {
+		t.Fatalf("target context = %v", got)
+	}
+}

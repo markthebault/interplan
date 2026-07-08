@@ -466,6 +466,12 @@ let annotate = false;
 let pendingTarget = null;
 let queued = [];
 let frameClickHandler = null;
+let frameMouseUpHandler = null;
+let frameDblClickHandler = null;
+let frameKeyUpHandler = null;
+let pendingElementClickTimer = null;
+let suppressNextClick = false;
+let suppressClickTimer = null;
 let scrollPosition = 0;
 
 // Connect to SSE for live reload
@@ -526,11 +532,55 @@ function selectorFor(el, doc){
 function textFor(el){
   return (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 240);
 }
+function normalizeSelectionText(value){
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 500);
+}
+function isEditableSelectionContext(doc){
+  const active = doc.activeElement;
+  if(!active || !active.closest) return false;
+  const tag = active.tagName ? active.tagName.toLowerCase() : "";
+  return tag === "input" || tag === "textarea" ||
+    !!active.closest("[contenteditable=''],[contenteditable='true'],[contenteditable]:not([contenteditable='false'])");
+}
+function elementFromSelectionRange(range){
+  let node = range.commonAncestorContainer;
+  if(!node) return null;
+  if(node.nodeType === 1) return node;
+  return node.parentElement || null;
+}
 function pickAnnotationTarget(start){
   if(!start || !start.closest) return start;
   return start.closest("[data-review-id],[data-testid],[data-id]") ||
     start.closest("article,section,aside,header,main,nav,div,li,tr,td,th,button,a,label") ||
     start;
+}
+function maybeCaptureSelection(doc){
+  if(!annotate || isEditableSelectionContext(doc)) return false;
+  const selection = doc.getSelection ? doc.getSelection() : null;
+  if(!selection || selection.rangeCount < 1 || selection.isCollapsed) return false;
+  const selectedText = normalizeSelectionText(selection.toString());
+  if(!selectedText) return false;
+  const container = elementFromSelectionRange(selection.getRangeAt(0));
+  const el = pickAnnotationTarget(container);
+  if(!el || !el.tagName) return false;
+  if(pendingElementClickTimer){
+    clearTimeout(pendingElementClickTimer);
+    pendingElementClickTimer = null;
+  }
+  suppressNextClick = true;
+  if(suppressClickTimer) clearTimeout(suppressClickTimer);
+  suppressClickTimer = setTimeout(() => { suppressNextClick = false; suppressClickTimer = null; }, 400);
+  openAnnotation({
+    kind:"text",
+    tag:el.tagName.toLowerCase(),
+    selector:selectorFor(el, doc),
+    text:selectedText,
+    context:textFor(el)
+  });
+  return true;
+}
+function captureSelectionSoon(doc){
+  setTimeout(() => { maybeCaptureSelection(doc); }, 0);
 }
 function attachFrameAnnotation(){
   let doc;
@@ -540,20 +590,50 @@ function attachFrameAnnotation(){
     return;
   }
   if(frameClickHandler) doc.removeEventListener("click", frameClickHandler, true);
+  if(frameMouseUpHandler) doc.removeEventListener("mouseup", frameMouseUpHandler, true);
+  if(frameDblClickHandler) doc.removeEventListener("dblclick", frameDblClickHandler, true);
+  if(frameKeyUpHandler) doc.removeEventListener("keyup", frameKeyUpHandler, true);
+  frameMouseUpHandler = () => { captureSelectionSoon(doc); };
+  frameDblClickHandler = () => { captureSelectionSoon(doc); };
+  frameKeyUpHandler = () => { captureSelectionSoon(doc); };
   frameClickHandler = event => {
     if(!annotate) return;
+    if(suppressNextClick){
+      suppressNextClick = false;
+      if(suppressClickTimer){ clearTimeout(suppressClickTimer); suppressClickTimer = null; }
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      return;
+    }
+    if(event.detail > 1){
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      return;
+    }
     const el = pickAnnotationTarget(event.target);
     if(!el) return;
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-    openAnnotation({
+    const target = {
       kind:"element",
       tag:el.tagName.toLowerCase(),
       selector:selectorFor(el, doc),
       text:textFor(el)
-    });
+    };
+    if(pendingElementClickTimer) clearTimeout(pendingElementClickTimer);
+    pendingElementClickTimer = setTimeout(() => {
+      pendingElementClickTimer = null;
+      if(!annotate || suppressNextClick) return;
+      if(maybeCaptureSelection(doc)) return;
+      openAnnotation(target);
+    }, 400);
   };
+  doc.addEventListener("mouseup", frameMouseUpHandler, true);
+  doc.addEventListener("dblclick", frameDblClickHandler, true);
+  doc.addEventListener("keyup", frameKeyUpHandler, true);
   doc.addEventListener("click", frameClickHandler, true);
   doc.documentElement.dataset.interplanAnnotate = annotate ? "true" : "false";
 }
@@ -565,12 +645,50 @@ function setAnnotate(next){
   attachFrameAnnotation();
   statusEl.textContent = annotate ? "Annotation mode: click an element in the artifact." : "";
 }
+function friendlyTargetLabel(tag){
+  const value = String(tag || "").toLowerCase();
+  if(/^h[1-6]$/.test(value)) return "heading";
+  if(value === "p") return "paragraph";
+  if(value === "a") return "link";
+  if(value === "button") return "button";
+  if(value === "img") return "image";
+  if(value === "ul" || value === "ol" || value === "li") return "list item";
+  if(value === "table" || value === "tr" || value === "td" || value === "th") return "table";
+  if(value === "nav") return "navigation";
+  if(value === "header") return "header";
+  if(value === "footer") return "footer";
+  if(value === "input" || value === "textarea" || value === "select") return "form field";
+  return "section";
+}
+function capitalizeLabel(value){
+  const label = String(value || "section");
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+function displaySnippet(value){
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if(!normalized) return "";
+  const chars = Array.from(normalized);
+  const clipped = chars.length > 90 ? chars.slice(0, 90).join("") + "..." : normalized;
+  return "\"" + clipped + "\"";
+}
 function renderChips(){
   chips.innerHTML = "";
   queued.forEach((item, index) => {
     const chip = document.createElement("div");
     chip.className = "chip";
-    chip.innerHTML = "<strong>"+item.target.tag+" annotation</strong><code>"+item.selector+"</code><p>"+item.prompt+"</p>";
+    const target = item.target || {};
+    const snippet = displaySnippet(target.kind === "text" ? item.text : target.text);
+    const label = document.createElement("strong");
+    label.textContent = target.kind === "text" ? "Selected text" : capitalizeLabel(friendlyTargetLabel(target.tag));
+    chip.appendChild(label);
+    if(snippet){
+      const selection = document.createElement("p");
+      selection.textContent = snippet;
+      chip.appendChild(selection);
+    }
+    const body = document.createElement("p");
+    body.textContent = item.prompt || "";
+    chip.appendChild(body);
     const remove = document.createElement("button");
     remove.textContent = "Remove";
     remove.onclick = () => { queued.splice(index,1); renderChips(); };
@@ -580,8 +698,17 @@ function renderChips(){
 }
 function openAnnotation(target){
   pendingTarget = target;
-  modalTitle.textContent = "Annotate <"+target.tag+">";
-  modalTarget.textContent = target.selector + (target.text ? " - " + target.text : "");
+  const label = friendlyTargetLabel(target.tag);
+  const snippet = displaySnippet(target.text);
+  if(target.kind === "text"){
+    modalTitle.textContent = "Comment on selected text";
+    modalTarget.textContent = "Text selected: " + snippet;
+    annotationText.placeholder = "Comment on this selected text";
+  } else {
+    modalTitle.textContent = "Comment on this " + label;
+    modalTarget.textContent = snippet ? "Selected " + label + ": " + snippet : "Selected " + label;
+    annotationText.placeholder = "Comment on this " + label;
+  }
   annotationText.value = "";
   modal.classList.add("open");
   setTimeout(() => annotationText.focus(), 0);
@@ -615,13 +742,23 @@ document.getElementById("cancelAnnotation").onclick = closeAnnotation;
 document.getElementById("queueAnnotation").onclick = () => {
   const text = annotationText.value.trim();
   if(!text || !pendingTarget) return;
-  queued.push({
-    tag:"element",
-    prompt:text,
-    text:pendingTarget.text || "",
-    selector:pendingTarget.selector,
-    target:{kind:"element", selector:pendingTarget.selector, tag:pendingTarget.tag, text:pendingTarget.text || ""}
-  });
+  if(pendingTarget.kind === "text"){
+    queued.push({
+      tag:"text",
+      prompt:text,
+      text:pendingTarget.text || "",
+      selector:pendingTarget.selector,
+      target:{kind:"text", selector:pendingTarget.selector, tag:pendingTarget.tag, text:pendingTarget.text || "", context:pendingTarget.context || ""}
+    });
+  } else {
+    queued.push({
+      tag:"element",
+      prompt:text,
+      text:pendingTarget.text || "",
+      selector:pendingTarget.selector,
+      target:{kind:"element", selector:pendingTarget.selector, tag:pendingTarget.tag, text:pendingTarget.text || ""}
+    });
+  }
   renderChips();
   closeAnnotation();
 };

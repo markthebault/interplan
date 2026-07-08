@@ -2,6 +2,28 @@ package cli
 
 import "testing"
 
+func TestNormalizeHelp(t *testing.T) {
+	for _, args := range [][]string{{"help"}, {"--help"}, {"-h"}, {"open", "--help"}} {
+		cmd, err := Normalize(args)
+		if err != nil {
+			t.Fatalf("Normalize(%v): %v", args, err)
+		}
+		if cmd.Name != "help" {
+			t.Fatalf("Normalize(%v) = %+v", args, cmd)
+		}
+	}
+}
+
+func TestNormalizeListCommand(t *testing.T) {
+	cmd, err := Normalize([]string{"list"})
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if cmd.Name != "list" {
+		t.Fatalf("Command = %+v", cmd)
+	}
+}
+
 func TestNormalizeBareHTMLPath(t *testing.T) {
 	cmd, err := Normalize([]string{"/tmp/doc.html"})
 	if err != nil {

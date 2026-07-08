@@ -45,12 +45,12 @@ Comparison against `lavish_axi_clone_spec.html` sections.
 - ✅ **Side panel + iframe layout**
 - ✅ **Annotate toggle** - Switch between explore/annotate modes
 - ✅ **Element annotation** - Click element, add comment, queue
-- ✅ **Text annotation** - Select text (basic - not fully polished)
+- ✅ **Text annotation** - Select artifact text, add comment, queue
 - ✅ **Comment textarea** - General message feedback
 - ✅ **Send / Send & End buttons**
 - ✅ **End Session button**
 - ✅ **Annotation chips** - Show queued feedback
-- ✅ **Modal for element annotations**
+- ✅ **Modal for element and text annotations**
 - ✅ **Selector generation** - Prefers data-* attributes, falls back to nth-of-type
 - ✅ **Text capture** - Nearby visible text for stale selector recovery
 - ⚠️ **Structured input collection** - Basic `window.interplan.queuePrompt()` API exists
