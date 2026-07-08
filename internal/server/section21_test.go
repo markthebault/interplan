@@ -137,11 +137,108 @@ func TestSessionAndArtifactRoutesRender(t *testing.T) {
 			t.Fatalf("session route did not include friendly annotation copy %q: %s", required, body)
 		}
 	}
+	for _, required := range []string{"session-ended", "Session ended", "markSessionEnded", "initialSessionEnded"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("session route did not include ended-session UI %q: %s", required, body)
+		}
+	}
 	if !containsAny(body, `tag:"text"`, `tag: "text"`) {
 		t.Fatalf("session route did not include text prompt tag: %s", body)
 	}
 	if !containsAny(body, `kind:"text"`, `kind: "text"`) {
 		t.Fatalf("session route did not include text target kind: %s", body)
+	}
+}
+
+func TestEndSessionRequestsShutdown(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "doc.html")
+	if err := os.WriteFile(file, []byte("<!doctype html><title>Draft</title>"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	canonical, err := session.CanonicalPath(file)
+	if err != nil {
+		t.Fatalf("CanonicalPath: %v", err)
+	}
+	key := session.Key(canonical)
+
+	for _, tc := range []struct {
+		name string
+		req  func() *http.Request
+	}{
+		{
+			name: "end button",
+			req: func() *http.Request {
+				return httptest.NewRequest(http.MethodPost, "/api/"+key+"/end", nil)
+			},
+		},
+		{
+			name: "send and end",
+			req: func() *http.Request {
+				body := bytes.NewBufferString(`{"prompts":[{"tag":"message","prompt":"Done"}],"endSession":true}`)
+				return httptest.NewRequest(http.MethodPost, "/api/"+key+"/prompts", body)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := session.NewStore(filepath.Join(t.TempDir(), "state.json"))
+			watcher := NewFileWatcher(false)
+			defer watcher.Stop()
+			if _, err := store.Open(canonical, session.URLFor(key, 37917), false); err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			shutdowns := 0
+			rec := httptest.NewRecorder()
+			HandlerWithShutdown(store, watcher, func() { shutdowns++ }).ServeHTTP(rec, tc.req())
+			if rec.Code != http.StatusOK {
+				t.Fatalf("end request = %d, body %s", rec.Code, rec.Body.String())
+			}
+			if shutdowns != 1 {
+				t.Fatalf("shutdown calls = %d", shutdowns)
+			}
+			sess, err := store.GetByKey(key)
+			if err != nil {
+				t.Fatalf("GetByKey: %v", err)
+			}
+			if sess.Status != "ended" || sess.EndedBy != "user" {
+				t.Fatalf("session not ended by user: %+v", sess)
+			}
+		})
+	}
+}
+
+func TestEndedSessionChromeIsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "doc.html")
+	if err := os.WriteFile(file, []byte("<!doctype html><title>Draft</title>"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	canonical, err := session.CanonicalPath(file)
+	if err != nil {
+		t.Fatalf("CanonicalPath: %v", err)
+	}
+	key := session.Key(canonical)
+	store := session.NewStore(filepath.Join(t.TempDir(), "state.json"))
+	watcher := NewFileWatcher(false)
+	defer watcher.Stop()
+	if _, err := store.Open(canonical, session.URLFor(key, 37917), false); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := store.End(canonical, "user"); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/session/"+key, nil)
+	rec := httptest.NewRecorder()
+	Handler(store, watcher).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("session route = %d, body %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, required := range []string{"const initialSessionEnded = true", "class=\"ended-banner\"", "Session ended", "markSessionEnded(\"Session ended.\")"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("ended session chrome missing %q: %s", required, body)
+		}
 	}
 }
 
