@@ -172,7 +172,7 @@ Validation rules:
 
 - `tag` is required.
 - `prompt` is required.
-- `tag` must be one of `message`, `element`, `input`, `choice`, `action`, `question`, `mermaid-node`, `layout-warning`.
+- `tag` must be one of `message`, `element`, `text`, `input`, `choice`, `action`, `question`, `mermaid-node`, `layout-warning`.
 - `queueKey`, when present, must be a non-empty string.
 - `value`, when present, may be any JSON value.
 

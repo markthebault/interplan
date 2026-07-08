@@ -91,21 +91,25 @@ Important prompt fields:
 
 - `tag: message`: general feedback from the side-panel textarea.
 - `tag: element`: targeted UI annotation.
+- `tag: text`: targeted selected-text annotation.
 - `prompt`: the user's requested change.
-- `selector`: CSS selector for the clicked element.
-- `text`: nearby visible text from the clicked element.
-- `target`: structured metadata such as element kind, tag, selector, and text.
+- `selector`: CSS selector for the clicked element or the element containing the selected text.
+- `text`: nearby visible text for element annotations, or the selected quote for text annotations.
+- `target`: structured metadata such as kind, tag, selector, text, and text-selection context.
 
 For `tag: element`, use both `selector` and `text`. Selectors can become stale after edits, so use the text as fallback context.
+
+For `tag: text`, treat `text` as the selected quote and `target.context` as nearby containing text. Use the selector to locate the containing element, then use the quote/context pair to find the exact wording if the selector drifts.
 
 Example:
 
 ```toon
 prompts[1]{tag,prompt,text,selector}:
   element,"Make this red","UI Browser review...","div[data-testid=\"browser-review-card\"]"
+  text,"Shorten this sentence","selected quote","p:nth-of-type(2)"
 ```
 
-Apply this as a targeted change to the element represented by the selector/text, then explain what changed.
+Apply this as a targeted change to the element or selected quote represented by the selector/text, then explain what changed.
 
 ## Updating The Artifact During Review
 

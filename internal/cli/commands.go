@@ -30,6 +30,12 @@ type Command struct {
 
 func Normalize(args []string) (Command, error) {
 	cmd := Command{Name: "list", Port: portFromEnv()}
+	for _, arg := range args {
+		if arg == "help" || arg == "--help" || arg == "-h" {
+			cmd.Name = "help"
+			return cmd, nil
+		}
+	}
 	var err error
 	args, err = parseGlobalFlags(args, &cmd)
 	if err != nil {
@@ -38,7 +44,7 @@ func Normalize(args []string) (Command, error) {
 	if len(args) == 0 {
 		return cmd, nil
 	}
-	known := map[string]bool{"open": true, "poll": true, "end": true, "server": true, "stop": true}
+	known := map[string]bool{"list": true, "open": true, "poll": true, "end": true, "server": true, "stop": true, "help": true}
 	if !known[args[0]] && isHTMLFile(args[0]) {
 		args = append([]string{"open"}, args...)
 	}
@@ -77,6 +83,10 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if cmd.Name == "help" {
+		writeHelp(stdout)
+		return nil
+	}
 	store, err := defaultStore()
 	if err != nil {
 		return err
@@ -97,6 +107,27 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	default:
 		return fmt.Errorf("unhandled command %q", cmd.Name)
 	}
+}
+
+func writeHelp(stdout io.Writer) {
+	fmt.Fprint(stdout, `Usage:
+  interplan                         list sessions
+  interplan <file.html>             open or resume a browser review session
+  interplan open <file.html>        open or resume a browser review session
+  interplan poll <file.html>        wait for browser feedback
+  interplan end <file.html>         end a session from the agent side
+  interplan server                  run the local server in the foreground
+  interplan help                    show this help
+
+Flags:
+  --json                            print JSON instead of TOON
+  --no-open                         disable browser opening
+  --reopen                          reopen user-ended sessions
+  --port <port>                     local server port
+  --timeout-ms <ms>                 bound a poll wait
+  --agent-reply <message>           send an agent status message before polling
+  --help, -h                        show this help
+`)
 }
 
 func runList(stdout io.Writer, store *session.Store, asJSON bool) error {
