@@ -133,6 +133,12 @@ End a session from the CLI:
 interplan end /tmp/plan.html
 ```
 
+Check the installed binary version:
+
+```sh
+interplan --version
+```
+
 ## CLI commands
 
 ```sh
@@ -142,6 +148,7 @@ interplan open <file.html>        # same as above
 interplan poll <file.html>        # wait for browser feedback
 interplan end <file.html>         # end a session from the agent side
 interplan server                  # run the local server in the foreground
+interplan --version               # print the binary version
 ```
 
 Useful flags:
@@ -153,6 +160,7 @@ Useful flags:
 --reopen                          # reopen a user-ended session
 --timeout-ms 30000                # bound a poll wait
 --agent-reply "Updated."          # send an agent status message before polling
+--version                         # print the binary version
 ```
 
 ## What the browser provides
@@ -206,6 +214,8 @@ Build locally:
 ```sh
 go build -o ./bin/interplan ./cmd/interplan
 ```
+
+Local builds without release flags report `interplan dev`. Release binaries embed the GitHub release tag at build time, so `interplan --version` reports values like `interplan v0.2.0`.
 
 Manual browser demo:
 

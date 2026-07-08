@@ -37,6 +37,10 @@ func Normalize(args []string) (Command, error) {
 			cmd.Name = "help"
 			return cmd, nil
 		}
+		if arg == "version" || arg == "--version" || arg == "-v" {
+			cmd.Name = "version"
+			return cmd, nil
+		}
 	}
 	var err error
 	args, err = parseGlobalFlags(args, &cmd)
@@ -46,7 +50,7 @@ func Normalize(args []string) (Command, error) {
 	if len(args) == 0 {
 		return cmd, nil
 	}
-	known := map[string]bool{"list": true, "open": true, "poll": true, "end": true, "server": true, "stop": true, "help": true}
+	known := map[string]bool{"list": true, "open": true, "poll": true, "end": true, "server": true, "stop": true, "help": true, "version": true}
 	if !known[args[0]] && isHTMLFile(args[0]) {
 		args = append([]string{"open"}, args...)
 	}
@@ -90,6 +94,10 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		writeHelp(stdout)
 		return nil
 	}
+	if cmd.Name == "version" {
+		writeVersion(stdout)
+		return nil
+	}
 	store, err := defaultStore()
 	if err != nil {
 		return err
@@ -120,6 +128,7 @@ func writeHelp(stdout io.Writer) {
   interplan poll <file.html>        wait for browser feedback
   interplan end <file.html>         end a session from the agent side
   interplan server                  run the local server in the foreground
+  interplan --version               print the binary version
   interplan help                    show this help
 
 Flags:
@@ -130,6 +139,7 @@ Flags:
   --port <port>                     local server port
   --timeout-ms <ms>                 bound a poll wait
   --agent-reply <message>           send an agent status message before polling
+  --version, -v                     print the binary version
   --help, -h                        show this help
 `)
 }

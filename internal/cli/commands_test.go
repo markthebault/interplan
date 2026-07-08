@@ -14,6 +14,18 @@ func TestNormalizeHelp(t *testing.T) {
 	}
 }
 
+func TestNormalizeVersion(t *testing.T) {
+	for _, args := range [][]string{{"version"}, {"--version"}, {"-v"}, {"open", "--version"}} {
+		cmd, err := Normalize(args)
+		if err != nil {
+			t.Fatalf("Normalize(%v): %v", args, err)
+		}
+		if cmd.Name != "version" {
+			t.Fatalf("Normalize(%v) = %+v", args, cmd)
+		}
+	}
+}
+
 func TestNormalizeListCommand(t *testing.T) {
 	cmd, err := Normalize([]string{"list"})
 	if err != nil {
