@@ -466,6 +466,7 @@ textarea{min-height:160px;resize:vertical;font:inherit;padding:10px;border:1px s
 .actions{display:flex;gap:8px;flex-wrap:wrap}button{padding:8px 10px;border:1px solid #9aa7b5;background:#f8fafc;border-radius:6px;cursor:pointer}button.primary{background:#174ea6;color:white;border-color:#174ea6}button.active{background:#111827;color:#fff;border-color:#111827}
 #status{font-size:12px;color:#52606d}
 body.annotating iframe{cursor:crosshair}
+#annotationHoverOutline{position:fixed;display:none;box-sizing:border-box;border:2px solid #dc2626;border-radius:4px;pointer-events:none;z-index:9}
 .chips{display:flex;flex-direction:column;gap:8px}.chip{border:1px solid #d6dbe1;border-radius:6px;padding:8px;background:#f8fafc}.chip strong{display:block;font-size:12px}.chip code{font-size:11px;color:#52606d;word-break:break-all}.chip p{margin:6px 0 0}
 .modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.28);display:none;align-items:center;justify-content:center;z-index:10}.modal-backdrop.open{display:flex}
 .modal{width:min(620px,calc(100vw - 32px));background:#0b1017;color:#f8fafc;border:1px solid #273241;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:18px;display:flex;flex-direction:column;gap:14px}
@@ -481,6 +482,7 @@ body.annotating iframe{cursor:crosshair}
 <div class="actions"><button class="primary" id="send">Send</button><button id="end">Send & End</button></div>
 <div id="status"></div>
 </aside>
+<div id="annotationHoverOutline" aria-hidden="true"></div>
 <div class="ended-banner" id="endedBanner">Session ended</div>
 <div class="modal-backdrop" id="modal">
   <div class="modal">
@@ -502,13 +504,18 @@ const modal = document.getElementById("modal");
 const annotationText = document.getElementById("annotationText");
 const modalTitle = document.getElementById("modalTitle");
 const modalTarget = document.getElementById("modalTarget");
+const annotationHoverOutline = document.getElementById("annotationHoverOutline");
 let annotate = false;
 let pendingTarget = null;
 let queued = [];
 let frameClickHandler = null;
+let frameMouseMoveHandler = null;
+let frameMouseLeaveHandler = null;
+let frameScrollHandler = null;
 let frameMouseUpHandler = null;
 let frameDblClickHandler = null;
 let frameKeyUpHandler = null;
+let hoveredAnnotationTarget = null;
 let pendingElementClickTimer = null;
 let suppressNextClick = false;
 let suppressClickTimer = null;
@@ -518,6 +525,7 @@ let sessionEnded = false;
 // Connect to SSE for live reload
 const sse = new EventSource("/sse/"+key);
 sse.addEventListener("reload", () => {
+  hideAnnotationHoverOutline();
   // Save scroll position before reload
   try {
     const frameDoc = frame.contentDocument || frame.contentWindow.document;
@@ -529,6 +537,7 @@ sse.addEventListener("reload", () => {
 
 // Restore scroll position after reload
 frame.addEventListener("load", () => {
+  hideAnnotationHoverOutline();
   if(scrollPosition > 0) {
     setTimeout(() => {
       try {
@@ -595,12 +604,45 @@ function pickAnnotationTarget(start){
     start.closest("article,section,aside,header,main,nav,div,li,tr,td,th,button,a,label") ||
     start;
 }
+function hideAnnotationHoverOutline(){
+  hoveredAnnotationTarget = null;
+  annotationHoverOutline.style.display = "none";
+}
+function selectionIsActive(doc){
+  const selection = doc && doc.getSelection ? doc.getSelection() : null;
+  return !!selection && selection.rangeCount > 0 && !selection.isCollapsed && !!normalizeSelectionText(selection.toString());
+}
+function updateAnnotationHoverOutline(el, doc){
+  if(!annotate || sessionEnded || modal.classList.contains("open") || !el || !el.getBoundingClientRect || selectionIsActive(doc)){
+    hideAnnotationHoverOutline();
+    return;
+  }
+  const rect = el.getBoundingClientRect();
+  const frameRect = frame.getBoundingClientRect();
+  const left = Math.max(frameRect.left, frameRect.left + rect.left);
+  const top = Math.max(frameRect.top, frameRect.top + rect.top);
+  const right = Math.min(frameRect.right, frameRect.left + rect.right);
+  const bottom = Math.min(frameRect.bottom, frameRect.top + rect.bottom);
+  const width = right - left;
+  const height = bottom - top;
+  if(width <= 0 || height <= 0){
+    hideAnnotationHoverOutline();
+    return;
+  }
+  hoveredAnnotationTarget = el;
+  annotationHoverOutline.style.display = "block";
+  annotationHoverOutline.style.left = left + "px";
+  annotationHoverOutline.style.top = top + "px";
+  annotationHoverOutline.style.width = width + "px";
+  annotationHoverOutline.style.height = height + "px";
+}
 function maybeCaptureSelection(doc){
   if(!annotate || isEditableSelectionContext(doc)) return false;
   const selection = doc.getSelection ? doc.getSelection() : null;
   if(!selection || selection.rangeCount < 1 || selection.isCollapsed) return false;
   const selectedText = normalizeSelectionText(selection.toString());
   if(!selectedText) return false;
+  hideAnnotationHoverOutline();
   const container = elementFromSelectionRange(selection.getRangeAt(0));
   const el = pickAnnotationTarget(container);
   if(!el || !el.tagName) return false;
@@ -631,9 +673,21 @@ function attachFrameAnnotation(){
     return;
   }
   if(frameClickHandler) doc.removeEventListener("click", frameClickHandler, true);
+  if(frameMouseMoveHandler) doc.removeEventListener("mousemove", frameMouseMoveHandler, true);
+  if(frameMouseLeaveHandler) doc.removeEventListener("mouseleave", frameMouseLeaveHandler, true);
+  if(frameScrollHandler) doc.removeEventListener("scroll", frameScrollHandler, true);
   if(frameMouseUpHandler) doc.removeEventListener("mouseup", frameMouseUpHandler, true);
   if(frameDblClickHandler) doc.removeEventListener("dblclick", frameDblClickHandler, true);
   if(frameKeyUpHandler) doc.removeEventListener("keyup", frameKeyUpHandler, true);
+  frameMouseMoveHandler = event => {
+    if(!annotate) return hideAnnotationHoverOutline();
+    const el = pickAnnotationTarget(event.target);
+    updateAnnotationHoverOutline(el, doc);
+  };
+  frameMouseLeaveHandler = () => { hideAnnotationHoverOutline(); };
+  frameScrollHandler = () => {
+    if(hoveredAnnotationTarget) updateAnnotationHoverOutline(hoveredAnnotationTarget, doc);
+  };
   frameMouseUpHandler = () => { captureSelectionSoon(doc); };
   frameDblClickHandler = () => { captureSelectionSoon(doc); };
   frameKeyUpHandler = () => { captureSelectionSoon(doc); };
@@ -672,6 +726,9 @@ function attachFrameAnnotation(){
       openAnnotation(target);
     }, 400);
   };
+  doc.addEventListener("mousemove", frameMouseMoveHandler, true);
+  doc.addEventListener("mouseleave", frameMouseLeaveHandler, true);
+  doc.addEventListener("scroll", frameScrollHandler, true);
   doc.addEventListener("mouseup", frameMouseUpHandler, true);
   doc.addEventListener("dblclick", frameDblClickHandler, true);
   doc.addEventListener("keyup", frameKeyUpHandler, true);
@@ -684,6 +741,7 @@ function setAnnotate(next){
   annotateBtn.classList.toggle("active", annotate);
   document.body.classList.toggle("annotating", annotate);
   annotateBtn.textContent = annotate ? "Annotating" : "Annotate";
+  if(!annotate) hideAnnotationHoverOutline();
   attachFrameAnnotation();
   statusEl.textContent = annotate ? "Annotation mode: click an element in the artifact." : "";
 }
@@ -692,6 +750,7 @@ function markSessionEnded(message){
   annotate = false;
   document.body.classList.add("session-ended");
   document.body.classList.remove("annotating");
+  hideAnnotationHoverOutline();
   annotateBtn.classList.remove("active");
   annotateBtn.textContent = "Annotate";
   for(const id of ["annotate","reload","send","end","endOnly","queueAnnotation"]){
@@ -756,6 +815,7 @@ function renderChips(){
   });
 }
 function openAnnotation(target){
+  hideAnnotationHoverOutline();
   pendingTarget = target;
   const label = friendlyTargetLabel(target.tag);
   const snippet = displaySnippet(target.text);
@@ -792,7 +852,10 @@ window.addEventListener("message", event => {
   if(event.data && event.data.type === "interplan:ready") attachFrameAnnotation();
 });
 annotateBtn.onclick = () => setAnnotate(!annotate);
-document.getElementById("reload").onclick = () => frame.contentWindow.location.reload();
+document.getElementById("reload").onclick = () => {
+  hideAnnotationHoverOutline();
+  frame.contentWindow.location.reload();
+};
 document.getElementById("send").onclick = () => send(false);
 document.getElementById("end").onclick = () => send(true);
 document.getElementById("endOnly").onclick = async () => {

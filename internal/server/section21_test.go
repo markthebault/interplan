@@ -132,6 +132,11 @@ func TestSessionAndArtifactRoutesRender(t *testing.T) {
 			t.Fatalf("session route did not include text annotation helper %q: %s", required, body)
 		}
 	}
+	for _, required := range []string{"annotationHoverOutline", "updateAnnotationHoverOutline", "hideAnnotationHoverOutline", "frameMouseMoveHandler", "frameMouseLeaveHandler", "frameScrollHandler", "selectionIsActive"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("session route did not include annotation hover helper %q: %s", required, body)
+		}
+	}
 	for _, required := range []string{"friendlyTargetLabel", "displaySnippet", "Text selected:", "Comment on selected text", "Comment on this "} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("session route did not include friendly annotation copy %q: %s", required, body)
