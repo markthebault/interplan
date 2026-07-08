@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"html"
@@ -18,10 +19,28 @@ import (
 func Serve(addr string, store *session.Store) error {
 	debugMode := os.Getenv("INTERPLAN_DEBUG") == "1"
 	watcher := NewFileWatcher(debugMode)
-	return http.ListenAndServe(addr, Handler(store, watcher))
+	defer watcher.Stop()
+	srv := &http.Server{Addr: addr}
+	srv.Handler = HandlerWithShutdown(store, watcher, func() {
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(ctx)
+		}()
+	})
+	err := srv.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
 
 func Handler(store *session.Store, watcher *FileWatcher) http.Handler {
+	return HandlerWithShutdown(store, watcher, nil)
+}
+
+func HandlerWithShutdown(store *session.Store, watcher *FileWatcher, shutdown func()) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -64,7 +83,7 @@ func Handler(store *session.Store, watcher *FileWatcher) http.Handler {
 			return
 		}
 		if r.URL.Path == "/api/end" && r.Method == http.MethodPost {
-			handleEnd(w, r, store)
+			handleEnd(w, r, store, shutdown)
 			return
 		}
 		if r.URL.Path == "/api/agent-reply" && r.Method == http.MethodPost {
@@ -73,7 +92,7 @@ func Handler(store *session.Store, watcher *FileWatcher) http.Handler {
 		}
 		key, ok := promptKey(r.URL.Path)
 		if ok && r.Method == http.MethodPost {
-			handlePrompts(w, r, store, key)
+			handlePrompts(w, r, store, key, shutdown)
 			return
 		}
 		if key, ok := keyedAction(r.URL.Path, "layout-warnings"); ok && r.Method == http.MethodPost {
@@ -81,7 +100,7 @@ func Handler(store *session.Store, watcher *FileWatcher) http.Handler {
 			return
 		}
 		if key, ok := keyedAction(r.URL.Path, "end"); ok && r.Method == http.MethodPost {
-			handleKeyEnd(w, r, store, key)
+			handleKeyEnd(w, r, store, key, shutdown)
 			return
 		}
 		http.NotFound(w, r)
@@ -220,7 +239,7 @@ func handlePoll(w http.ResponseWriter, r *http.Request, store *session.Store) {
 	}
 }
 
-func handleEnd(w http.ResponseWriter, r *http.Request, store *session.Store) {
+func handleEnd(w http.ResponseWriter, r *http.Request, store *session.Store, shutdown func()) {
 	var req struct {
 		File    string `json:"file"`
 		EndedBy string `json:"ended_by"`
@@ -251,6 +270,7 @@ func handleEnd(w http.ResponseWriter, r *http.Request, store *session.Store) {
 		Session:  protocol.SessionInfo{File: sess.File, URL: sess.URL, Status: sess.Status},
 		NextStep: "Session ended by " + endedBy + ".",
 	})
+	shutdownServer(shutdown)
 }
 
 func handleAgentReply(w http.ResponseWriter, r *http.Request, store *session.Store) {
@@ -278,7 +298,7 @@ func handleAgentReply(w http.ResponseWriter, r *http.Request, store *session.Sto
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func handlePrompts(w http.ResponseWriter, r *http.Request, store *session.Store, key string) {
+func handlePrompts(w http.ResponseWriter, r *http.Request, store *session.Store, key string, shutdown func()) {
 	var post session.PromptPost
 	if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -298,6 +318,9 @@ func handlePrompts(w http.ResponseWriter, r *http.Request, store *session.Store,
 		"pending_prompts": sess.PendingPrompts,
 		"session_ended":   sess.Status == "ended",
 	})
+	if sess.Status == "ended" {
+		shutdownServer(shutdown)
+	}
 }
 
 func handleLayoutWarnings(w http.ResponseWriter, r *http.Request, store *session.Store, key string) {
@@ -313,7 +336,7 @@ func handleLayoutWarnings(w http.ResponseWriter, r *http.Request, store *session
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func handleKeyEnd(w http.ResponseWriter, r *http.Request, store *session.Store, key string) {
+func handleKeyEnd(w http.ResponseWriter, r *http.Request, store *session.Store, key string, shutdown func()) {
 	sess, err := store.GetByKey(key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -324,6 +347,13 @@ func handleKeyEnd(w http.ResponseWriter, r *http.Request, store *session.Store, 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	shutdownServer(shutdown)
+}
+
+func shutdownServer(shutdown func()) {
+	if shutdown != nil {
+		shutdown()
+	}
 }
 
 func promptKey(path string) (string, bool) {
@@ -427,6 +457,10 @@ header strong{font-size:14px}.spacer{flex:1}
 iframe{width:100%;height:100%;border:0;background:white}
 main{min-width:0;min-height:0}
 aside{border-left:1px solid #d6dbe1;background:#fff;padding:16px;display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto}
+body.session-ended main,body.session-ended aside{filter:grayscale(1);opacity:.55}
+body.session-ended button,body.session-ended textarea{cursor:not-allowed}
+.ended-banner{display:none;position:fixed;inset:48px 0 0;z-index:20;align-items:center;justify-content:center;background:rgba(246,247,249,.74);backdrop-filter:blur(2px);color:#111827;text-align:center;font-weight:800;font-size:clamp(28px,6vw,64px);letter-spacing:0}
+body.session-ended .ended-banner{display:flex}
 h1{font-size:16px;margin:0}.meta{font-size:12px;color:#657282;word-break:break-all}
 textarea{min-height:160px;resize:vertical;font:inherit;padding:10px;border:1px solid #bbc4cf;border-radius:6px}
 .actions{display:flex;gap:8px;flex-wrap:wrap}button{padding:8px 10px;border:1px solid #9aa7b5;background:#f8fafc;border-radius:6px;cursor:pointer}button.primary{background:#174ea6;color:white;border-color:#174ea6}button.active{background:#111827;color:#fff;border-color:#111827}
@@ -447,6 +481,7 @@ body.annotating iframe{cursor:crosshair}
 <div class="actions"><button class="primary" id="send">Send</button><button id="end">Send & End</button></div>
 <div id="status"></div>
 </aside>
+<div class="ended-banner" id="endedBanner">Session ended</div>
 <div class="modal-backdrop" id="modal">
   <div class="modal">
     <h2 id="modalTitle">Annotate element</h2>
@@ -457,6 +492,7 @@ body.annotating iframe{cursor:crosshair}
 </div>
 <script>
 const key = ` + strconv.Quote(sess.Key) + `;
+const initialSessionEnded = ` + strconv.FormatBool(sess.Status == "ended") + `;
 const frame = document.getElementById("artifact");
 const prompt = document.getElementById("prompt");
 const statusEl = document.getElementById("status");
@@ -477,6 +513,7 @@ let pendingElementClickTimer = null;
 let suppressNextClick = false;
 let suppressClickTimer = null;
 let scrollPosition = 0;
+let sessionEnded = false;
 
 // Connect to SSE for live reload
 const sse = new EventSource("/sse/"+key);
@@ -642,12 +679,30 @@ function attachFrameAnnotation(){
   doc.documentElement.dataset.interplanAnnotate = annotate ? "true" : "false";
 }
 function setAnnotate(next){
+  if(sessionEnded) return;
   annotate = next;
   annotateBtn.classList.toggle("active", annotate);
   document.body.classList.toggle("annotating", annotate);
   annotateBtn.textContent = annotate ? "Annotating" : "Annotate";
   attachFrameAnnotation();
   statusEl.textContent = annotate ? "Annotation mode: click an element in the artifact." : "";
+}
+function markSessionEnded(message){
+  sessionEnded = true;
+  annotate = false;
+  document.body.classList.add("session-ended");
+  document.body.classList.remove("annotating");
+  annotateBtn.classList.remove("active");
+  annotateBtn.textContent = "Annotate";
+  for(const id of ["annotate","reload","send","end","endOnly","queueAnnotation"]){
+    const el = document.getElementById(id);
+    if(el) el.disabled = true;
+  }
+  prompt.disabled = true;
+  annotationText.disabled = true;
+  modal.classList.remove("open");
+  statusEl.textContent = message || "Session ended.";
+  if(sse) sse.close();
 }
 function friendlyTargetLabel(tag){
   const value = String(tag || "").toLowerCase();
@@ -722,6 +777,7 @@ function closeAnnotation(){
   pendingTarget = null;
 }
 async function send(endSession){
+  if(sessionEnded) return;
   const text = prompt.value.trim();
   const prompts = queued.slice();
   if(text) prompts.push({tag:"message",prompt:text});
@@ -729,6 +785,7 @@ async function send(endSession){
   const res = await fetch("/api/"+key+"/prompts",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({prompts,domSnapshot:"",endSession})});
   statusEl.textContent = res.ok ? (endSession ? "Sent and ended." : "Sent.") : "Send failed.";
   if(res.ok){ prompt.value = ""; queued = []; renderChips(); }
+  if(res.ok && endSession) markSessionEnded("Session ended.");
 }
 window.addEventListener("message", event => {
   if(event.source !== frame.contentWindow) return;
@@ -739,8 +796,10 @@ document.getElementById("reload").onclick = () => frame.contentWindow.location.r
 document.getElementById("send").onclick = () => send(false);
 document.getElementById("end").onclick = () => send(true);
 document.getElementById("endOnly").onclick = async () => {
+  if(sessionEnded) return;
   const res = await fetch("/api/"+key+"/end",{method:"POST"});
-  statusEl.textContent = res.ok ? "Ended." : "End failed.";
+  if(res.ok) markSessionEnded("Session ended.");
+  else statusEl.textContent = "End failed.";
 };
 document.getElementById("cancelAnnotation").onclick = closeAnnotation;
 document.getElementById("queueAnnotation").onclick = () => {
@@ -768,6 +827,7 @@ document.getElementById("queueAnnotation").onclick = () => {
 };
 modal.addEventListener("click", event => { if(event.target === modal) closeAnnotation(); });
 document.addEventListener("keydown", event => { if(event.key === "Escape" && modal.classList.contains("open")) closeAnnotation(); });
+if(initialSessionEnded) markSessionEnded("Session ended.");
 </script>`
 	_, _ = w.Write([]byte(body))
 }
