@@ -7,7 +7,18 @@ import (
 	"github.com/markthebault/interplan/internal/cli"
 )
 
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
 func main() {
+	cli.SetVersion(cli.VersionInfo{
+		Version: version,
+		Commit:  commit,
+		Date:    date,
+	})
 	if err := cli.Run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

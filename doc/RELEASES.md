@@ -96,6 +96,15 @@ interplan_vX.Y.Z_windows_amd64.zip
 checksums.txt
 ```
 
+The release workflow passes the GitHub release tag into `scripts/build-release.sh`, and the build script embeds it into the binary with Go linker flags. That means a release binary prints the tag it was built from:
+
+```sh
+interplan --version
+# interplan v0.2.0
+```
+
+Snapshot binaries use a `snapshot-<short-sha>` version, and local builds without release flags report `interplan dev`.
+
 ## Snapshot Binaries On Main
 
 Every push to `main` runs CI.
