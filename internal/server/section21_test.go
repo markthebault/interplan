@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/markthebault/interplan/internal/protocol"
 	"github.com/markthebault/interplan/internal/session"
 )
 
@@ -52,6 +54,32 @@ func TestSection21MinimalProtocol(t *testing.T) {
 	}
 	if poll.NextStep != "Apply final feedback, stop polling, do not reopen." {
 		t.Fatalf("next step = %q", poll.NextStep)
+	}
+}
+
+func TestOpenSessionUsesPublicHost(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "doc.html")
+	if err := os.WriteFile(file, []byte("<!doctype html><title>Draft</title>"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	store := session.NewStore(filepath.Join(t.TempDir(), "state.json"))
+	watcher := NewFileWatcher(false)
+	defer watcher.Stop()
+	body := bytes.NewBufferString(`{"file":"` + file + `","public_host":"192.168.1.20","reopen":true}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", body)
+	req.Host = "127.0.0.1:49001"
+	rec := httptest.NewRecorder()
+	Handler(store, watcher).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/sessions = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var out protocol.SessionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.HasPrefix(out.Session.URL, "http://192.168.1.20:49001/session/") {
+		t.Fatalf("session URL = %q", out.Session.URL)
 	}
 }
 

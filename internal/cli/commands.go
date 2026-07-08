@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ type Command struct {
 	JSON       bool
 	Reopen     bool
 	NoOpen     bool
+	Expose     bool
 	Port       int
 	AgentReply string
 	Timeout    time.Duration
@@ -54,6 +56,7 @@ func Normalize(args []string) (Command, error) {
 	fs.BoolVar(&cmd.JSON, "json", cmd.JSON, "print JSON")
 	fs.BoolVar(&cmd.Reopen, "reopen", false, "reopen user-ended sessions")
 	fs.BoolVar(&cmd.NoOpen, "no-open", cmd.NoOpen, "disable browser opening")
+	fs.BoolVar(&cmd.Expose, "expose-external", cmd.Expose, "bind server to 0.0.0.0 and return a LAN URL")
 	fs.IntVar(&cmd.Port, "port", cmd.Port, "server port")
 	fs.StringVar(&cmd.AgentReply, "agent-reply", "", "append agent reply")
 	timeout := fs.Int("timeout-ms", 0, "poll timeout in milliseconds")
@@ -101,7 +104,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	case "end":
 		return runEnd(stdout, stderr, cmd)
 	case "server":
-		return server.Serve("127.0.0.1:"+strconv.Itoa(cmd.Port), store)
+		return server.Serve(bindHost(cmd)+":"+strconv.Itoa(cmd.Port), store)
 	case "stop":
 		return fmt.Errorf("stop is not implemented yet")
 	default:
@@ -122,6 +125,7 @@ func writeHelp(stdout io.Writer) {
 Flags:
   --json                            print JSON instead of TOON
   --no-open                         disable browser opening
+  --expose-external                 bind to 0.0.0.0 and return a LAN URL
   --reopen                          reopen user-ended sessions
   --port <port>                     local server port
   --timeout-ms <ms>                 bound a poll wait
@@ -150,8 +154,15 @@ func runOpen(stdout, stderr io.Writer, cmd Command) error {
 	if err := ensureServer(cmd, stderr); err != nil {
 		return err
 	}
+	publicHost := ""
+	if cmd.Expose {
+		publicHost, err = externalHost()
+		if err != nil {
+			return err
+		}
+	}
 	client := newAPIClient(cmd.Port)
-	out, status, err := client.open(file, cmd.Reopen)
+	out, status, err := client.open(file, cmd.Reopen, publicHost)
 	if status == 409 {
 		_ = writeOutput(stdout, out, cmd.JSON)
 		return nil
@@ -238,6 +249,8 @@ func parseGlobalFlags(args []string, cmd *Command) ([]string, error) {
 			cmd.JSON = true
 		case arg == "--no-open":
 			cmd.NoOpen = true
+		case arg == "--expose-external":
+			cmd.Expose = true
 		case arg == "--port":
 			i++
 			if i >= len(args) {
@@ -264,13 +277,26 @@ func parseGlobalFlags(args []string, cmd *Command) ([]string, error) {
 func ensureServer(cmd Command, stderr io.Writer) error {
 	client := newAPIClient(cmd.Port)
 	if client.health() {
+		if cmd.Expose {
+			host, err := externalHost()
+			if err != nil {
+				return err
+			}
+			if !newAPIClientForHost(host, cmd.Port).health() {
+				return fmt.Errorf("server is already running on 127.0.0.1:%d; restart it with --expose-external to bind 0.0.0.0", cmd.Port)
+			}
+		}
 		return nil
 	}
 	exe, err := platform.CurrentExecutable()
 	if err != nil {
 		return err
 	}
-	if err := platform.StartDetached(exe, "server", "--port", strconv.Itoa(cmd.Port)); err != nil {
+	args := []string{"server", "--port", strconv.Itoa(cmd.Port)}
+	if cmd.Expose {
+		args = append(args, "--expose-external")
+	}
+	if err := platform.StartDetached(exe, args...); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(3 * time.Second)
@@ -281,4 +307,43 @@ func ensureServer(cmd Command, stderr io.Writer) error {
 		}
 	}
 	return fmt.Errorf("server did not become healthy on port %d", cmd.Port)
+}
+
+func bindHost(cmd Command) string {
+	if cmd.Expose {
+		return "0.0.0.0"
+	}
+	return "127.0.0.1"
+}
+
+func externalHost() (string, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "", err
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch value := addr.(type) {
+			case *net.IPNet:
+				ip = value.IP
+			case *net.IPAddr:
+				ip = value.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			if ipv4 := ip.To4(); ipv4 != nil {
+				return ipv4.String(), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("could not find a non-loopback IPv4 address for --expose-external")
 }

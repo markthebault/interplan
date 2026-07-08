@@ -15,3 +15,12 @@ func TestKeyIsStableShortSHA(t *testing.T) {
 		t.Fatal("Different paths should not produce the same short key in this fixture")
 	}
 }
+
+func TestURLForHost(t *testing.T) {
+	if got := URLForHost("abc123", "192.168.1.20", 49001); got != "http://192.168.1.20:49001/session/abc123" {
+		t.Fatalf("URLForHost = %q", got)
+	}
+	if got := URLForHost("abc123", "", 49001); got != "http://127.0.0.1:49001/session/abc123" {
+		t.Fatalf("URLForHost default = %q", got)
+	}
+}

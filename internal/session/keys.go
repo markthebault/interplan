@@ -24,7 +24,14 @@ func Key(canonicalPath string) string {
 }
 
 func URLFor(key string, port int) string {
-	return "http://127.0.0.1:" + itoa(port) + "/session/" + key
+	return URLForHost(key, "127.0.0.1", port)
+}
+
+func URLForHost(key, host string, port int) string {
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return "http://" + host + ":" + itoa(port) + "/session/" + key
 }
 
 func itoa(n int) string {
