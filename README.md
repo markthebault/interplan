@@ -149,6 +149,7 @@ Useful flags:
 ```sh
 --json                            # print JSON instead of TOON
 --no-open                         # do not open the browser automatically
+--expose-external                 # bind to 0.0.0.0 and return a LAN URL
 --reopen                          # reopen a user-ended session
 --timeout-ms 30000                # bound a poll wait
 --agent-reply "Updated."          # send an agent status message before polling

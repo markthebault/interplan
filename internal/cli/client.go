@@ -18,8 +18,12 @@ type apiClient struct {
 }
 
 func newAPIClient(port int) apiClient {
+	return newAPIClientForHost("127.0.0.1", port)
+}
+
+func newAPIClientForHost(host string, port int) apiClient {
 	return apiClient{
-		base: "http://127.0.0.1:" + strconv.Itoa(port),
+		base: "http://" + host + ":" + strconv.Itoa(port),
 		http: &http.Client{Timeout: 5 * time.Second},
 	}
 }
@@ -41,8 +45,8 @@ func (c apiClient) health() bool {
 	return resp.StatusCode == http.StatusOK && body.OK && body.Name == "interplan" && body.ProtocolVersion == 2
 }
 
-func (c apiClient) open(file string, reopen bool) (protocol.SessionResponse, int, error) {
-	body, _ := json.Marshal(protocol.SessionRequest{File: file, Reopen: reopen})
+func (c apiClient) open(file string, reopen bool, publicHost string) (protocol.SessionResponse, int, error) {
+	body, _ := json.Marshal(protocol.SessionRequest{File: file, Reopen: reopen, PublicHost: publicHost})
 	var out protocol.SessionResponse
 	status, err := c.doJSON(http.MethodPost, c.base+"/api/sessions", body, &out)
 	return out, status, err

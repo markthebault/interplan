@@ -6,8 +6,9 @@ type SessionResponse struct {
 }
 
 type SessionRequest struct {
-	File   string `json:"file"`
-	Reopen bool   `json:"reopen"`
+	File       string `json:"file"`
+	Reopen     bool   `json:"reopen"`
+	PublicHost string `json:"public_host,omitempty"`
 }
 
 type PollResponse struct {

@@ -63,3 +63,23 @@ func TestNormalizeGlobalPortAndNoOpen(t *testing.T) {
 		t.Fatalf("Command = %+v", cmd)
 	}
 }
+
+func TestNormalizeExposeExternal(t *testing.T) {
+	cmd, err := Normalize([]string{"--expose-external", "open", "/tmp/doc.html"})
+	if err != nil {
+		t.Fatalf("Normalize global expose: %v", err)
+	}
+	if !cmd.Expose {
+		t.Fatalf("Command = %+v", cmd)
+	}
+	cmd, err = Normalize([]string{"server", "--expose-external"})
+	if err != nil {
+		t.Fatalf("Normalize server expose: %v", err)
+	}
+	if cmd.Name != "server" || !cmd.Expose {
+		t.Fatalf("Command = %+v", cmd)
+	}
+	if bindHost(cmd) != "0.0.0.0" {
+		t.Fatalf("bindHost = %q", bindHost(cmd))
+	}
+}

@@ -162,7 +162,11 @@ func handleOpen(w http.ResponseWriter, r *http.Request, store *session.Store) {
 		return
 	}
 	key := session.Key(file)
-	sess, err := store.Open(file, session.URLFor(key, requestPort(r)), req.Reopen)
+	publicHost := req.PublicHost
+	if publicHost == "" {
+		publicHost = requestHost(r)
+	}
+	sess, err := store.Open(file, session.URLForHost(key, publicHost, requestPort(r)), req.Reopen)
 	var ended session.UserEndedError
 	if errors.As(err, &ended) {
 		writeJSON(w, http.StatusConflict, protocol.SessionResponse{
@@ -789,6 +793,17 @@ func requestPort(r *http.Request) int {
 		return 37917
 	}
 	return p
+}
+
+func requestHost(r *http.Request) string {
+	host, _, ok := strings.Cut(r.Host, ":")
+	if !ok {
+		return r.Host
+	}
+	if host == "" {
+		return "127.0.0.1"
+	}
+	return host
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
